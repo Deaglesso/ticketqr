@@ -94,11 +94,24 @@
     .status-invalid { color: #ef4444; font-weight: 600; }
     #video {
       width: 100%;
+      max-height: 400px;
       border-radius: 8px;
       background: #000;
-      display: none;
+      display: block;
+      margin: 20px 0;
     }
-    #video.active { display: block; }
+    #video.hidden { display: none; }
+    .video-container {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: 8px;
+      margin: 20px 0;
+      min-height: 300px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
     #canvas { display: none; }
     .result {
       padding: 20px;
@@ -152,45 +165,102 @@
     .back-btn:hover {
       background: rgba(255,255,255,0.1);
     }
+    .config-section {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
   <div id="app"></div>
 
   <script>
-    // Storage implementation - SHARED across all users
+    // CONFIGURATION - Set your Supabase details here
+    const SUPABASE_URL = localStorage.getItem('supabase_url') || '';
+    const SUPABASE_KEY = localStorage.getItem('supabase_key') || '';
+    
+    // Storage implementation - Supabase or localStorage fallback
     const storage = {
       async get(key) {
-        if (window.storage) {
-          // Use Claude's shared storage
-          return await window.storage.get(key, true);
+        if (SUPABASE_URL && SUPABASE_KEY) {
+          try {
+            const response = await fetch(`${SUPABASE_URL}/rest/v1/qr_codes?id=eq.${key}`, {
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+              }
+            });
+            const data = await response.json();
+            return data.length > 0 ? { key, value: data[0].data } : null;
+          } catch (e) {
+            console.error('Supabase error:', e);
+            return null;
+          }
         } else {
-          // Fallback to localStorage (local only)
           const value = localStorage.getItem(key);
           return value ? { key, value } : null;
         }
       },
       async set(key, value) {
-        if (window.storage) {
-          // Use Claude's shared storage
-          return await window.storage.set(key, value, true);
+        if (SUPABASE_URL && SUPABASE_KEY) {
+          try {
+            await fetch(`${SUPABASE_URL}/rest/v1/qr_codes`, {
+              method: 'POST',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates'
+              },
+              body: JSON.stringify({ id: key, data: value })
+            });
+            return { key, value };
+          } catch (e) {
+            console.error('Supabase error:', e);
+            localStorage.setItem(key, value);
+            return { key, value };
+          }
         } else {
-          // Fallback to localStorage
           localStorage.setItem(key, value);
           return { key, value };
         }
       },
       async delete(key) {
-        if (window.storage) {
-          return await window.storage.delete(key, true);
-        } else {
-          localStorage.removeItem(key);
-          return { key, deleted: true };
+        if (SUPABASE_URL && SUPABASE_KEY) {
+          try {
+            await fetch(`${SUPABASE_URL}/rest/v1/qr_codes?id=eq.${key}`, {
+              method: 'DELETE',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+              }
+            });
+          } catch (e) {
+            console.error('Supabase error:', e);
+          }
         }
+        localStorage.removeItem(key);
+        return { key, deleted: true };
       },
       async list(prefix) {
-        if (window.storage) {
-          return await window.storage.list(prefix, true);
+        if (SUPABASE_URL && SUPABASE_KEY) {
+          try {
+            const response = await fetch(`${SUPABASE_URL}/rest/v1/qr_codes?id=like.${prefix}*`, {
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+              }
+            });
+            const data = await response.json();
+            return { keys: data.map(item => item.id) };
+          } catch (e) {
+            console.error('Supabase error:', e);
+            const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+            return { keys };
+          }
         } else {
           const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
           return { keys };
@@ -312,17 +382,27 @@
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
         state.stream = stream;
         state.isScanning = true;
         
         const video = document.getElementById('video');
         video.srcObject = stream;
-        video.classList.add('active');
-        await video.play();
+        video.classList.remove('hidden');
         
-        render();
-        scanFrame();
+        // Wait for video to be ready
+        video.onloadedmetadata = () => {
+          video.play();
+          render();
+          scanFrame();
+        };
+        
       } catch (e) {
         if (e.name === 'NotAllowedError') {
           state.cameraError = 'Camera permission denied. Please allow camera access in browser settings.';
@@ -341,7 +421,10 @@
       }
       state.isScanning = false;
       const video = document.getElementById('video');
-      if (video) video.classList.remove('active');
+      if (video) {
+        video.classList.add('hidden');
+        video.srcObject = null;
+      }
       render();
     }
 
@@ -426,14 +509,28 @@
       const app = document.getElementById('app');
       
       if (state.page === 'menu') {
+        const dbStatus = SUPABASE_URL && SUPABASE_KEY ? 
+          '✓ Database Connected' : 
+          '⚠️ Using Local Storage (Configure Database)';
+        const dbColor = SUPABASE_URL && SUPABASE_KEY ? '#10b981' : '#f59e0b';
+        
         app.innerHTML = `
           <div class="container">
             <div class="card menu-card">
               <h1>🎫 QR Code System</h1>
               <p style="text-align: center; color: #666; margin-bottom: 10px;">Single-use validation system</p>
-              <p style="text-align: center; color: #10b981; font-weight: 600; margin-bottom: 30px;">
-                ✓ Shared Storage - Access from any device!
+              <p style="text-align: center; color: ${dbColor}; font-weight: 600; margin-bottom: 20px;">
+                ${dbStatus}
               </p>
+              ${!SUPABASE_URL || !SUPABASE_KEY ? `
+                <div class="config-section">
+                  <strong>⚙️ Database Setup Required</strong>
+                  <p style="font-size: 0.9rem; margin: 10px 0;">To sync across devices, configure Supabase database.</p>
+                  <button class="btn-secondary btn-small" onclick="changePage('config')" style="width: 100%;">
+                    Configure Database
+                  </button>
+                </div>
+              ` : ''}
               <button class="btn-primary" onclick="changePage('generator')">📱 Generate QR Codes</button>
               <button class="btn-primary" onclick="changePage('validator')">📷 Scan & Validate</button>
               <div class="stats">
@@ -530,7 +627,9 @@
             <div class="card">
               <h2>📷 Scan & Validate</h2>
               ${errorHtml}
-              <video id="video" autoplay playsinline></video>
+              <div class="video-container ${state.isScanning ? '' : 'hidden'}">
+                <video id="video" autoplay playsinline class="hidden"></video>
+              </div>
               <canvas id="canvas"></canvas>
               ${!state.isScanning && !state.scanResult ? '<div style="background: #f3f4f6; padding: 60px; text-align: center; border-radius: 8px; margin: 20px 0;"><div style="font-size: 3rem;">📷</div><p style="color: #666;">Click Start Camera to begin scanning</p></div>' : ''}
               <div class="flex-row">
@@ -552,6 +651,54 @@
                   <li>Valid codes become invalid after scan</li>
                 </ol>
               </div>
+            </div>
+          </div>
+        `;
+      } else if (state.page === 'config') {
+        app.innerHTML = `
+          <div class="container">
+            <button class="back-btn" onclick="changePage('menu')">← Back to Menu</button>
+            <div class="card">
+              <h2>⚙️ Database Configuration</h2>
+              <div class="info-box">
+                <strong>Setup Instructions:</strong>
+                <ol style="margin-left: 20px; margin-top: 10px; line-height: 1.6;">
+                  <li>Go to <a href="https://supabase.com" target="_blank" style="color: #667eea;">supabase.com</a> and create a free account</li>
+                  <li>Create a new project</li>
+                  <li>Go to Settings → API</li>
+                  <li>Copy the "Project URL" and "anon public" API key</li>
+                  <li>In SQL Editor, run this query:<br>
+                    <code style="display: block; background: #f3f4f6; padding: 10px; margin-top: 5px; border-radius: 4px; overflow-x: auto;">
+CREATE TABLE qr_codes (<br>
+&nbsp;&nbsp;id TEXT PRIMARY KEY,<br>
+&nbsp;&nbsp;data TEXT NOT NULL,<br>
+&nbsp;&nbsp;created_at TIMESTAMP DEFAULT NOW()<br>
+);<br>
+<br>
+ALTER TABLE qr_codes ENABLE ROW LEVEL SECURITY;<br>
+<br>
+CREATE POLICY "Enable all access" ON qr_codes<br>
+FOR ALL USING (true) WITH CHECK (true);
+                    </code>
+                  </li>
+                </ol>
+              </div>
+              
+              <h3 style="margin-top: 30px; margin-bottom: 15px;">Enter Your Supabase Details:</h3>
+              <input 
+                type="text" 
+                id="supabaseUrl" 
+                placeholder="Supabase URL (e.g., https://xxx.supabase.co)"
+                value="${localStorage.getItem('supabase_url') || ''}"
+              />
+              <input 
+                type="text" 
+                id="supabaseKey" 
+                placeholder="Supabase API Key (anon public)"
+                value="${localStorage.getItem('supabase_key') || ''}"
+              />
+              <button class="btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
+              <button class="btn-danger" onclick="clearConfig()">🗑️ Clear Configuration</button>
             </div>
           </div>
         `;
@@ -577,6 +724,30 @@
       await loadCodes();
       render();
       alert('Codes refreshed! Total: ' + state.codes.length);
+    }
+
+    function saveConfig() {
+      const url = document.getElementById('supabaseUrl').value.trim();
+      const key = document.getElementById('supabaseKey').value.trim();
+      
+      if (!url || !key) {
+        alert('Please enter both URL and API key');
+        return;
+      }
+      
+      localStorage.setItem('supabase_url', url);
+      localStorage.setItem('supabase_key', key);
+      alert('Configuration saved! Please refresh the page.');
+      location.reload();
+    }
+
+    function clearConfig() {
+      if (confirm('Clear database configuration?')) {
+        localStorage.removeItem('supabase_url');
+        localStorage.removeItem('supabase_key');
+        alert('Configuration cleared! Please refresh the page.');
+        location.reload();
+      }
     }
 
     // Initialize

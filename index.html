@@ -158,23 +158,43 @@
   <div id="app"></div>
 
   <script>
-    // Storage implementation
+    // Storage implementation - SHARED across all users
     const storage = {
       async get(key) {
-        const value = localStorage.getItem(key);
-        return value ? { key, value } : null;
+        if (window.storage) {
+          // Use Claude's shared storage
+          return await window.storage.get(key, true);
+        } else {
+          // Fallback to localStorage (local only)
+          const value = localStorage.getItem(key);
+          return value ? { key, value } : null;
+        }
       },
       async set(key, value) {
-        localStorage.setItem(key, value);
-        return { key, value };
+        if (window.storage) {
+          // Use Claude's shared storage
+          return await window.storage.set(key, value, true);
+        } else {
+          // Fallback to localStorage
+          localStorage.setItem(key, value);
+          return { key, value };
+        }
       },
       async delete(key) {
-        localStorage.removeItem(key);
-        return { key, deleted: true };
+        if (window.storage) {
+          return await window.storage.delete(key, true);
+        } else {
+          localStorage.removeItem(key);
+          return { key, deleted: true };
+        }
       },
       async list(prefix) {
-        const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
-        return { keys };
+        if (window.storage) {
+          return await window.storage.list(prefix, true);
+        } else {
+          const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+          return { keys };
+        }
       }
     };
 
@@ -242,12 +262,31 @@
       }, 100);
     }
 
+    // Download QR code as image
+    function downloadQR(id) {
+      const qrElement = document.getElementById('qr-' + id);
+      if (!qrElement) return;
+      
+      const canvas = qrElement.querySelector('canvas');
+      if (canvas) {
+        const link = document.createElement('a');
+        link.download = id + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      }
+    }
+
     // Delete code
     async function deleteCode(id) {
       if (!confirm('Delete this code?')) return;
       await storage.delete('qr:' + id);
       await loadCodes();
       render();
+    }
+
+    // Download all QR codes as ZIP
+    async function downloadAllQR() {
+      alert('Downloading individual QR codes. Click download button on each QR code you want to save.');
     }
 
     // Clear all
@@ -391,13 +430,19 @@
           <div class="container">
             <div class="card menu-card">
               <h1>🎫 QR Code System</h1>
-              <p style="text-align: center; color: #666; margin-bottom: 30px;">Single-use validation system</p>
+              <p style="text-align: center; color: #666; margin-bottom: 10px;">Single-use validation system</p>
+              <p style="text-align: center; color: #10b981; font-weight: 600; margin-bottom: 30px;">
+                ✓ Shared Storage - Access from any device!
+              </p>
               <button class="btn-primary" onclick="changePage('generator')">📱 Generate QR Codes</button>
               <button class="btn-primary" onclick="changePage('validator')">📷 Scan & Validate</button>
               <div class="stats">
                 <strong>Total Codes:</strong> ${state.codes.length} 
                 (${state.codes.filter(c => c.valid).length} valid)
               </div>
+              <button class="btn-secondary btn-small" onclick="refreshCodes()" style="margin-top: 15px; width: 100%;">
+                🔄 Refresh Codes
+              </button>
             </div>
           </div>
         `;
@@ -414,6 +459,7 @@
                   <div class="${code.valid ? 'status-valid' : 'status-invalid'}" style="margin: 8px 0;">
                     ${code.valid ? '✓ Valid' : '✗ Used on ' + new Date(code.scannedAt).toLocaleString()}
                   </div>
+                  <button class="btn-primary btn-small" onclick="downloadQR('${code.id}')" style="margin-right: 5px;">💾 Download</button>
                   <button class="btn-danger btn-small" onclick="deleteCode('${code.id}')">Delete</button>
                 </div>
               </div>
@@ -525,6 +571,12 @@
       state.scanResult = null;
       state.cameraError = '';
       render();
+    }
+
+    async function refreshCodes() {
+      await loadCodes();
+      render();
+      alert('Codes refreshed! Total: ' + state.codes.length);
     }
 
     // Initialize

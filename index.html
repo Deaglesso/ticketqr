@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code System</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+    }
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 2.5rem;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+    }
+    h2 {
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 1.8rem;
+      border-bottom: 3px solid #667eea;
+      padding-bottom: 10px;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+    button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+    .btn-primary { background: #667eea; color: white; }
+    .btn-primary:hover { background: #5568d3; }
+    .btn-secondary { background: #6b7280; color: white; }
+    .btn-secondary:hover { background: #4b5563; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-small {
+      width: auto;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      display: inline-block;
+    }
+    input {
+      width: 100%;
+      padding: 15px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      margin-bottom: 15px;
+    }
+    input:focus { outline: none; border-color: #667eea; }
+    .qr-list { max-height: 500px; overflow-y: auto; margin-top: 20px; }
+    .qr-item {
+      background: #f9fafb;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+      display: flex;
+      gap: 15px;
+    }
+    .qr-item.invalid { background: #fee; border-color: #fca5a5; }
+    .qr-item.valid { background: #d1fae5; border-color: #10b981; }
+    .qr-display { flex-shrink: 0; background: white; padding: 10px; border-radius: 8px; }
+    .qr-info { flex: 1; }
+    .qr-id {
+      font-family: monospace;
+      font-size: 0.9rem;
+      font-weight: 600;
+      word-break: break-all;
+      margin-bottom: 8px;
+    }
+    .status-valid { color: #10b981; font-weight: 600; }
+    .status-invalid { color: #ef4444; font-weight: 600; }
+    #video {
+      width: 100%;
+      border-radius: 8px;
+      background: #000;
+      display: none;
+    }
+    #video.active { display: block; }
+    #canvas { display: none; }
+    .result {
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      font-weight: 600;
+      text-align: center;
+    }
+    .result.success {
+      background: #d1fae5;
+      color: #065f46;
+      border: 2px solid #10b981;
+    }
+    .result.error {
+      background: #fee;
+      color: #991b1b;
+      border: 2px solid #ef4444;
+    }
+    .info-box {
+      background: #eff6ff;
+      border: 2px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 20px;
+      font-size: 0.9rem;
+      color: #1e40af;
+    }
+    .flex-row { display: flex; gap: 10px; }
+    .flex-row button { width: 50%; }
+    .hidden { display: none; }
+    .text-center { text-align: center; }
+    .menu-card {
+      max-width: 500px;
+      margin: 100px auto;
+    }
+    .stats {
+      background: #f3f4f6;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      margin-top: 20px;
+    }
+    .back-btn {
+      background: transparent;
+      color: white;
+      border: 2px solid white;
+      width: auto;
+      padding: 10px 20px;
+      margin-bottom: 20px;
+    }
+    .back-btn:hover {
+      background: rgba(255,255,255,0.1);
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script>
+    // Storage implementation
+    const storage = {
+      async get(key) {
+        const value = localStorage.getItem(key);
+        return value ? { key, value } : null;
+      },
+      async set(key, value) {
+        localStorage.setItem(key, value);
+        return { key, value };
+      },
+      async delete(key) {
+        localStorage.removeItem(key);
+        return { key, deleted: true };
+      },
+      async list(prefix) {
+        const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+        return { keys };
+      }
+    };
+
+    // State
+    let state = {
+      page: 'menu',
+      codes: [],
+      newCodeData: '',
+      scanResult: null,
+      cameraError: '',
+      isScanning: false,
+      stream: null
+    };
+
+    // Load codes
+    async function loadCodes() {
+      try {
+        const result = await storage.list('qr:');
+        if (result && result.keys) {
+          const codes = [];
+          for (const key of result.keys) {
+            try {
+              const data = await storage.get(key);
+              if (data) codes.push(JSON.parse(data.value));
+            } catch (e) {}
+          }
+          codes.sort((a, b) => new Date(b.created) - new Date(a.created));
+          state.codes = codes;
+        }
+      } catch (e) {
+        console.log('No codes yet');
+      }
+    }
+
+    // Generate QR Code
+    async function generateQRCode() {
+      const data = state.newCodeData.trim();
+      if (!data) {
+        alert('Please enter data');
+        return;
+      }
+
+      const code = {
+        id: 'QR-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        data: data,
+        created: new Date().toISOString(),
+        valid: true,
+        scannedAt: null
+      };
+
+      await storage.set('qr:' + code.id, JSON.stringify(code));
+      state.newCodeData = '';
+      await loadCodes();
+      render();
+      
+      setTimeout(() => {
+        const el = document.getElementById('qr-' + code.id);
+        if (el && window.QRCode) {
+          new QRCode(el, {
+            text: code.id,
+            width: 100,
+            height: 100
+          });
+        }
+      }, 100);
+    }
+
+    // Delete code
+    async function deleteCode(id) {
+      if (!confirm('Delete this code?')) return;
+      await storage.delete('qr:' + id);
+      await loadCodes();
+      render();
+    }
+
+    // Clear all
+    async function clearAll() {
+      if (!confirm('Delete ALL codes?')) return;
+      for (const code of state.codes) {
+        await storage.delete('qr:' + code.id);
+      }
+      await loadCodes();
+      render();
+    }
+
+    // Start scanner
+    async function startScanner() {
+      state.cameraError = '';
+      state.scanResult = null;
+      render();
+
+      if (!navigator.mediaDevices) {
+        state.cameraError = 'Camera not supported';
+        render();
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        state.stream = stream;
+        state.isScanning = true;
+        
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        video.classList.add('active');
+        await video.play();
+        
+        render();
+        scanFrame();
+      } catch (e) {
+        if (e.name === 'NotAllowedError') {
+          state.cameraError = 'Camera permission denied. Please allow camera access in browser settings.';
+        } else {
+          state.cameraError = 'Camera error: ' + e.message;
+        }
+        render();
+      }
+    }
+
+    // Stop scanner
+    function stopScanner() {
+      if (state.stream) {
+        state.stream.getTracks().forEach(t => t.stop());
+        state.stream = null;
+      }
+      state.isScanning = false;
+      const video = document.getElementById('video');
+      if (video) video.classList.remove('active');
+      render();
+    }
+
+    // Scan frame
+    function scanFrame() {
+      if (!state.isScanning) return;
+
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      
+      if (!video || !canvas) {
+        requestAnimationFrame(scanFrame);
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        if (window.jsQR) {
+          const code = jsQR(imageData.data, imageData.width, imageData.height);
+          if (code && code.data) {
+            validateCode(code.data);
+            return;
+          }
+        }
+      }
+
+      requestAnimationFrame(scanFrame);
+    }
+
+    // Validate code
+    async function validateCode(scannedId) {
+      stopScanner();
+
+      try {
+        const result = await storage.get('qr:' + scannedId);
+        
+        if (!result) {
+          state.scanResult = { success: false, message: 'QR Code not found' };
+          render();
+          return;
+        }
+
+        const code = JSON.parse(result.value);
+
+        if (!code.valid) {
+          state.scanResult = { 
+            success: false, 
+            message: 'QR Code Already Used',
+            scannedAt: code.scannedAt 
+          };
+          render();
+          return;
+        }
+
+        code.valid = false;
+        code.scannedAt = new Date().toISOString();
+        await storage.set('qr:' + code.id, JSON.stringify(code));
+
+        state.scanResult = { 
+          success: true, 
+          message: '✅ Valid Code Scanned!',
+          data: code.data 
+        };
+
+        await loadCodes();
+        render();
+      } catch (e) {
+        state.scanResult = { success: false, message: 'Error: ' + e.message };
+        render();
+      }
+    }
+
+    // Render
+    function render() {
+      const app = document.getElementById('app');
+      
+      if (state.page === 'menu') {
+        app.innerHTML = `
+          <div class="container">
+            <div class="card menu-card">
+              <h1>🎫 QR Code System</h1>
+              <p style="text-align: center; color: #666; margin-bottom: 30px;">Single-use validation system</p>
+              <button class="btn-primary" onclick="changePage('generator')">📱 Generate QR Codes</button>
+              <button class="btn-primary" onclick="changePage('validator')">📷 Scan & Validate</button>
+              <div class="stats">
+                <strong>Total Codes:</strong> ${state.codes.length} 
+                (${state.codes.filter(c => c.valid).length} valid)
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (state.page === 'generator') {
+        const codesHtml = state.codes.length === 0 
+          ? '<p class="text-center" style="padding: 40px; color: #999;">No codes generated yet</p>'
+          : state.codes.map(code => `
+              <div class="qr-item ${code.valid ? 'valid' : 'invalid'}">
+                <div class="qr-display" id="qr-${code.id}"></div>
+                <div class="qr-info">
+                  <div class="qr-id">${code.id}</div>
+                  <div style="font-size: 0.9rem; margin: 5px 0;">Data: ${code.data}</div>
+                  <div style="font-size: 0.8rem; color: #666;">Created: ${new Date(code.created).toLocaleString()}</div>
+                  <div class="${code.valid ? 'status-valid' : 'status-invalid'}" style="margin: 8px 0;">
+                    ${code.valid ? '✓ Valid' : '✗ Used on ' + new Date(code.scannedAt).toLocaleString()}
+                  </div>
+                  <button class="btn-danger btn-small" onclick="deleteCode('${code.id}')">Delete</button>
+                </div>
+              </div>
+            `).join('');
+
+        app.innerHTML = `
+          <div class="container">
+            <button class="back-btn" onclick="changePage('menu')">← Back to Menu</button>
+            <div class="card">
+              <h2>📱 Generate QR Codes</h2>
+              <input 
+                type="text" 
+                id="codeInput" 
+                placeholder="Enter data (e.g., Ticket #123)"
+                value="${state.newCodeData}"
+              />
+              <button class="btn-primary" onclick="handleGenerate()">Generate QR Code</button>
+              <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center;">
+                <h3>Generated Codes (${state.codes.length})</h3>
+                ${state.codes.length > 0 ? '<button class="btn-danger btn-small" onclick="clearAll()">Clear All</button>' : ''}
+              </div>
+              <div class="qr-list">${codesHtml}</div>
+            </div>
+          </div>
+        `;
+
+        const input = document.getElementById('codeInput');
+        if (input) {
+          input.addEventListener('input', (e) => {
+            state.newCodeData = e.target.value;
+          });
+          input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleGenerate();
+          });
+        }
+
+        setTimeout(() => {
+          state.codes.forEach(code => {
+            const el = document.getElementById('qr-' + code.id);
+            if (el && el.children.length === 0 && window.QRCode) {
+              new QRCode(el, {
+                text: code.id,
+                width: 100,
+                height: 100,
+                colorDark: code.valid ? '#000' : '#666',
+                colorLight: code.valid ? '#fff' : '#fee'
+              });
+            }
+          });
+        }, 100);
+      } else if (state.page === 'validator') {
+        const errorHtml = state.cameraError 
+          ? `<div class="result error">${state.cameraError}</div>`
+          : '';
+
+        const resultHtml = state.scanResult 
+          ? `<div class="result ${state.scanResult.success ? 'success' : 'error'}">
+              <div style="font-size: 1.2rem; margin-bottom: 10px;">${state.scanResult.message}</div>
+              ${state.scanResult.data ? '<div>Data: ' + state.scanResult.data + '</div>' : ''}
+              ${state.scanResult.scannedAt ? '<div style="font-size: 0.9rem; margin-top: 8px;">Previously scanned: ' + new Date(state.scanResult.scannedAt).toLocaleString() + '</div>' : ''}
+              <button class="btn-primary btn-small" onclick="resetScan()" style="margin-top: 15px;">Scan Another</button>
+            </div>`
+          : '';
+
+        app.innerHTML = `
+          <div class="container">
+            <button class="back-btn" onclick="stopScanner(); changePage('menu');">← Back to Menu</button>
+            <div class="card">
+              <h2>📷 Scan & Validate</h2>
+              ${errorHtml}
+              <video id="video" autoplay playsinline></video>
+              <canvas id="canvas"></canvas>
+              ${!state.isScanning && !state.scanResult ? '<div style="background: #f3f4f6; padding: 60px; text-align: center; border-radius: 8px; margin: 20px 0;"><div style="font-size: 3rem;">📷</div><p style="color: #666;">Click Start Camera to begin scanning</p></div>' : ''}
+              <div class="flex-row">
+                <button class="btn-primary" onclick="startScanner()" ${state.isScanning ? 'disabled' : ''}>
+                  Start Camera
+                </button>
+                <button class="btn-secondary" onclick="stopScanner()" ${!state.isScanning ? 'disabled' : ''}>
+                  Stop Camera
+                </button>
+              </div>
+              ${resultHtml}
+              <div class="info-box">
+                <strong>Instructions:</strong>
+                <ol style="margin-left: 20px; margin-top: 10px;">
+                  <li>Click "Start Camera"</li>
+                  <li>Allow camera permission</li>
+                  <li>Point at QR code</li>
+                  <li>Code validates automatically</li>
+                  <li>Valid codes become invalid after scan</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function changePage(page) {
+      state.page = page;
+      render();
+    }
+
+    function handleGenerate() {
+      generateQRCode();
+    }
+
+    function resetScan() {
+      state.scanResult = null;
+      state.cameraError = '';
+      render();
+    }
+
+    // Initialize
+    loadCodes().then(render);
+  </script>
+</body>
+</html>
